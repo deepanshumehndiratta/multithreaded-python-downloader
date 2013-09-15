@@ -1,7 +1,7 @@
 Multithreaded Python downloader
 ===============================
 
-A multi threaded Command line downloader in Python
+A callback driven multi-threaded Command line downloader in Python.
 
 Usage
 -----
