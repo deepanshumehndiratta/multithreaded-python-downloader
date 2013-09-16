@@ -41,24 +41,33 @@ class Downloader(threading.Thread):
     '''
       If the host does not support multiple connections per download, use a single one
     '''
-    if self.__startByte == 0 and self.__endByte == 0:
-      r = requests.get(self.__url, stream = True)
-    else:
-      r = requests.get(self.__url, headers={"Range": "bytes=" + str(self.__startByte) + "-" + str(self.__endByte)}, stream = True)
+    try:
+      if self.__startByte == 0 and self.__endByte == 0:
+        r = requests.get(self.__url, stream = True)
+      else:
+        r = requests.get(self.__url, headers={"Range": "bytes=" + str(self.__startByte) + "-" + str(self.__endByte)}, stream = True)
+    except:
+      self._ERROR = True
+      self.__callback(self)
+      return
 
     if r.status_code >=200 and r.status_code < 300:
-      with open(downloadDirectory + self.__fileName, 'w+') as f:
-        for chunk in r.iter_content(chunk_size=1024):
-          # filter out keep-alive new chunks
-          if chunk:
-            f.write(chunk)
-            f.flush()
-            os.fsync(f)
-        f.close()
+      try:
+        with open(downloadDirectory + self.__fileName, 'w+') as f:
+          for chunk in r.iter_content(chunk_size=1024):
+            # filter out keep-alive new chunks
+            if chunk:
+              f.write(chunk)
+              f.flush()
+              os.fsync(f)
+          f.close()
+      except:
+        self._ERROR = True
     else:
       self._ERROR = True
     # When finished downloading, callback the _threadHandler in UrlHandler
     self.__callback(self)
+    return
 
 class UrlHandler:
 
@@ -82,25 +91,35 @@ class UrlHandler:
     Handle Callbacks from threads of Downloader and create new threads or retry previous ones if they failed
   '''
   def _threadHandler(self,callbackThread):
-    if callbackThread._ERROR == True:
-      if callbackThread._tries < callbackThread._allowedTries:
-        callbackThread.download()
+    # Lock resources till new thread is created or parts are combined
+    lock = threading.Lock()
+    while True:
+      if not lock.acquire(False):
+        pass
       else:
-        self.__ERROR = True
-    else:
-      # Increment thye number of successfully downloaded chunks
-      self.__timesRun += 1
-      # If all chunks have been downloaded, prooceed to combine them
-      if self.__timesToRun == self.__timesRun:
-        self.__makeFile()
+        break
+    try:
+      if callbackThread._ERROR == True:
+        if callbackThread._tries < callbackThread._allowedTries:
+          callbackThread.download()
+        else:
+          self.__ERROR = True
       else:
-        '''
-          Create threads for new chunks, if required [At a time only, a maximum of maxDownloadThreads no.
-          of threads will be running]
-        '''
-        if self.__runningThreads < self.__timesToRun:
-          self.__makeDownloadThread()
-    return
+        # Increment thye number of successfully downloaded chunks
+        self.__timesRun += 1
+        # If all chunks have been downloaded, prooceed to combine them
+        if self.__timesToRun == self.__timesRun:
+          self.__makeFile()
+        else:
+          '''
+            Create threads for new chunks, if required [At a time only, a maximum of maxDownloadThreads no.
+            of threads will be running]
+          '''
+          if self.__runningThreads < self.__timesToRun:
+            self.__makeDownloadThread()
+    finally:
+      lock.release()
+      return
 
   def __makeFile(self):
     if self.__timesToRun == 1:
@@ -112,16 +131,20 @@ class UrlHandler:
       if self.__ERROR == True:
         print "Error in downloading file."
       else:
-        # Combine all file parts
-        path = self.__getPath(downloadDirectory + self.__fileName)
-        destination = open(path, 'a+')
-        for l in range(0,self.__timesToRun):
-          shutil.copyfileobj(open(downloadDirectory + self.__fileName + ".part" + str(l), 'rb'), destination)
-          os.remove(downloadDirectory + self.__fileName + ".part" + str(l))
-        destination.close()
-        print "File download successful. Details:\n-----------------------------------------------\n"
-        print "File size: " + self.__size + " Bytes."
-        print "Location: " + path + "\n"
+        try:
+          # Combine all file parts
+          path = self.__getPath(downloadDirectory + self.__fileName)
+          destination = open(path, 'a+')
+          for l in range(0,self.__timesToRun):
+            shutil.copyfileobj(open(downloadDirectory + self.__fileName + ".part" + str(l), 'rb'), destination)
+            os.remove(downloadDirectory + self.__fileName + ".part" + str(l))
+          destination.close()
+          print "File download successful. Details:\n-----------------------------------------------\n"
+          print "File size: " + self.__size + " Bytes."
+          print "Location: " + path + "\n"
+        except:
+          print "Download successful. Error in combining file parts."
+          return
     return
 
   def __makeDownloadThread(self):
@@ -156,7 +179,11 @@ class UrlHandler:
   def download(self):
     self.__fileName = self.__url2name(self.__url)
 
-    r = requests.head(self.__url)
+    try:
+      r = requests.head(self.__url)
+    except:
+      print "Error fetching file details."
+      return
 
     if r.status_code >=200 and r.status_code < 300:
 
