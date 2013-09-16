@@ -47,9 +47,9 @@ class Downloader(threading.Thread):
     '''
     try:
       if self.__startByte == 0 and self.__endByte == 0:
-        r = requests.get(self.__url, stream = True)
+        r = requests.get(self.__url, stream = True, allow_redirects=True)
       else:
-        r = requests.get(self.__url, headers={"Range": "bytes=" + str(self.__startByte) + "-" + str(self.__endByte)}, stream = True)
+        r = requests.get(self.__url, headers={"Range": "bytes=" + str(self.__startByte) + "-" + str(self.__endByte)}, stream = True, allow_redirects=True)
     except:
       self._ERROR = True
       self.__callback(self)
@@ -235,7 +235,7 @@ class UrlHandler:
     self.__fileName = self.__url2name(self.__url)
 
     try:
-      r = requests.head(self.__url)
+      r = requests.head(self.__url, allow_redirects=True)
     except:
       print "Error fetching file details."
       return
@@ -243,13 +243,13 @@ class UrlHandler:
     if r.status_code >=200 and r.status_code < 300:
 
       # Get size of file
-      if r.headers.has_key('content-length'):
+      if 'content-length' in r.headers:
         self.__size = r.headers['content-length']
       else:
         self.__size = 0
 
       # Try to aquire the best possible file name available
-      if r.headers.has_key('content-disposition'):
+      if 'content-disposition' in r.headers:
         # If the response has Content-Disposition, we take file name from it
         self.__fileName = r.headers['content-disposition'].split('filename=')[1]
         if self.__fileName[0] == '"' or self.__fileName[0] == "'":
