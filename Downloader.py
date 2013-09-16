@@ -4,6 +4,7 @@
   @URL: http://www.deepanshumehndiratta.com
 '''
 
+from __future__ import division
 import os,sys,threading,requests,shutil,base64,random,time
 from urlparse import urlsplit
 from urlparse import urlparse
@@ -68,9 +69,14 @@ class Downloader(threading.Thread):
                 self.__statusReporter(self.__bytesDownloaded)
                 self.__bytesDownloaded = 0
               self.__lastTime = (int(time.time()))
+
+          # Report progress before exiting
+          self.__statusReporter(self.__bytesDownloaded)
+          self.__bytesDownloaded = 0
+          self.__lastTime = (int(time.time()))
+
           f.close()
-      except Exception, e:
-        #print "Couldn't do it: %s" % e
+      except:
         self._ERROR = True
         self.__callback(self)
         return
@@ -84,6 +90,7 @@ class UrlHandler:
 
   def __init__(self,url):
     self.__url = url
+    self.__size = 0
     self.__timesToRun = 1
     self.__runningThreads = 0
     self.__timesRun = 0
@@ -91,6 +98,7 @@ class UrlHandler:
     self.__downloadedBytes = 0
     self.__lastTime = int(time.time())
     self.__charsToDelete = 0
+    self.__progress = 0
 
   '''
     Get name of the file from URL.
@@ -100,6 +108,19 @@ class UrlHandler:
       return base64.urlsafe_b64encode('{uri.scheme}://{uri.netloc}/'.format(uri=urlparse(url)))
     else:
       return os.path.basename(urlsplit(url)[2])
+
+  def __printProgress(self):
+    if int(self.__size) > 0:
+      try:
+        self.__progress = ("%.2f" % ((int(self.__downloadedBytes) / int(self.__size)) * 100))
+        txt = "Download Progress: "
+        for i in range(0,self.__charsToDelete):
+          print "\r",
+        self.__charsToDelete = len(str(self.__progress)) + len(txt) + 1
+        print txt + str(self.__progress) + "%",
+        sys.stdout.flush()
+      except Exception, e:
+        print "Couldn't do it: %s" % e
 
   def _statusReporter(self,addedBytes):
     lock = threading.Lock()
@@ -115,11 +136,7 @@ class UrlHandler:
       self.__lastTime = int(time.time())
     finally:
       if prevTime + 1 <= self.__lastTime:
-        for i in range(0,self.__charsToDelete):
-          print "\r",
-        self.__charsToDelete = len(str(self.__downloadedBytes))
-        print str(self.__downloadedBytes),
-        sys.stdout.flush()
+        self.__printProgress()
       lock.release()
 
   '''
@@ -174,9 +191,10 @@ class UrlHandler:
             shutil.copyfileobj(open(downloadDirectory + self.__fileName + ".part" + str(l), 'rb'), destination)
             os.remove(downloadDirectory + self.__fileName + ".part" + str(l))
           destination.close()
-          for i in range(0,self.__charsToDelete):
-            print "\r",
-          print "File download successful. Details:\n-----------------------------------------------\n"
+          
+          self.__printProgress()
+
+          print "\nFile download successful. Details:\n-----------------------------------------------\n"
           print "File size: " + self.__size + " Bytes."
           print "Location: " + path + "\n"
         except:
