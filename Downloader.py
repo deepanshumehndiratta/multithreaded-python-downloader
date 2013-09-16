@@ -4,7 +4,7 @@
   @URL: http://www.deepanshumehndiratta.com
 '''
 
-import os,sys,threading,requests,shutil,base64,random
+import os,sys,threading,requests,shutil,base64,random,time
 from urlparse import urlsplit
 from urlparse import urlparse
 
@@ -20,7 +20,7 @@ maxDownloadThreads = 5
 '''
 class Downloader(threading.Thread):
   
-  def __init__(self,fileName,url,startByte,endByte,callback):
+  def __init__(self,fileName,url,startByte,endByte,callback,statusReporter):
     threading.Thread.__init__(self)
     self.__fileName = fileName
     self.__url = url
@@ -28,8 +28,11 @@ class Downloader(threading.Thread):
     self.__endByte = endByte
     self._ERROR = False
     self.__callback = callback
+    self.__statusReporter = statusReporter
     self._tries = 0
     self._allowedTries = 5
+    self.__bytesDownloaded = 0
+    self.__lastTime = int(time.time())
 
   def run(self):
     self.download()
@@ -60,9 +63,17 @@ class Downloader(threading.Thread):
               f.write(chunk)
               f.flush()
               os.fsync(f)
+              self.__bytesDownloaded += len(chunk)
+              if (int(time.time())) - 1 >= self.__lastTime:
+                self.__statusReporter(self.__bytesDownloaded)
+                self.__bytesDownloaded = 0
+              self.__lastTime = (int(time.time()))
           f.close()
-      except:
+      except Exception, e:
+        #print "Couldn't do it: %s" % e
         self._ERROR = True
+        self.__callback(self)
+        return
     else:
       self._ERROR = True
     # When finished downloading, callback the _threadHandler in UrlHandler
@@ -77,6 +88,9 @@ class UrlHandler:
     self.__runningThreads = 0
     self.__timesRun = 0
     self.__ERROR = False
+    self.__downloadedBytes = 0
+    self.__lastTime = int(time.time())
+    self.__charsToDelete = 0
 
   '''
     Get name of the file from URL.
@@ -86,6 +100,27 @@ class UrlHandler:
       return base64.urlsafe_b64encode('{uri.scheme}://{uri.netloc}/'.format(uri=urlparse(url)))
     else:
       return os.path.basename(urlsplit(url)[2])
+
+  def _statusReporter(self,addedBytes):
+    lock = threading.Lock()
+    while True:
+      if not lock.acquire(False):
+        pass
+      else:
+        break
+    prevTime = 0
+    try:
+      self.__downloadedBytes += addedBytes
+      prevTime = self.__lastTime
+      self.__lastTime = int(time.time())
+    finally:
+      if prevTime + 1 <= self.__lastTime:
+        for i in range(0,self.__charsToDelete):
+          print "\r",
+        self.__charsToDelete = len(str(self.__downloadedBytes))
+        print str(self.__downloadedBytes),
+        sys.stdout.flush()
+      lock.release()
 
   '''
     Handle Callbacks from threads of Downloader and create new threads or retry previous ones if they failed
@@ -139,6 +174,8 @@ class UrlHandler:
             shutil.copyfileobj(open(downloadDirectory + self.__fileName + ".part" + str(l), 'rb'), destination)
             os.remove(downloadDirectory + self.__fileName + ".part" + str(l))
           destination.close()
+          for i in range(0,self.__charsToDelete):
+            print "\r",
           print "File download successful. Details:\n-----------------------------------------------\n"
           print "File size: " + self.__size + " Bytes."
           print "Location: " + path + "\n"
@@ -154,7 +191,7 @@ class UrlHandler:
     else:
       startByte = 0
       endByte = startByte + maxChunkSize
-    Downloader(self.__fileName + ".part" + str(self.__runningThreads),self.__url,startByte,endByte,self._threadHandler).start()
+    Downloader(self.__fileName + ".part" + str(self.__runningThreads),self.__url,startByte,endByte,self._threadHandler,self._statusReporter).start()
     self.__runningThreads += 1
 
   '''
@@ -228,7 +265,7 @@ class UrlHandler:
         '''
         # Handle file name already present exception [Do not over write]
         self.__fileName = self.__getPath(downloadDirectory + self.__fileName).split("/")[-1]
-        thread = Downloader(self.__fileName,self.__url,0,0,self._threadHandler)
+        thread = Downloader(self.__fileName,self.__url,0,0,self._threadHandler,self._statusReporter)
         thread.start()
 
       return
